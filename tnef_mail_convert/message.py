@@ -5,8 +5,9 @@ Message conversion from MIME with winmail.dat to extracted attachments
 import base64
 from email.parser import Parser
 import email.message
+import email
 from tnefparse import TNEF
-from typing import Union
+from typing import Union, IO
 import copy
 
 WINMAIL_NAME = 'winmail.dat'
@@ -19,7 +20,6 @@ class Message(object):
     tnef_payload: Union[email.message.Message, None]
 
     def __init__(self):
-        self.original_body = None
         self.message = email.message.Message()
         self.tnef_message = None
         self.tnef_payload = None
@@ -27,8 +27,14 @@ class Message(object):
 
     def parse(self, text: str):
         parser = Parser()
-        self.original_body = text
         self.message = parser.parsestr(text)
+        self._parse()
+
+    def parse_file(self, fp: IO[bytes]):
+        self.message = email.message_from_binary_file(fp)
+        self._parse()
+
+    def _parse(self):
         self._read_tnef()
         if self.has_winmail():
             self._extract_body()
@@ -47,7 +53,7 @@ class Message(object):
     def as_string(self):
         return self.message.as_string()
 
-    def as_string_without_winmail(self):
+    def get_message_without_winmail(self):
         result = copy.copy(self.message)
 
         del result["X-MS-TNEF-Correlator"]
@@ -59,7 +65,7 @@ class Message(object):
 
         result.set_payload(payloads)
 
-        return result.as_string()
+        return result
 
     def _read_tnef(self):
         # TODO: does this work in non-multipart?

@@ -1,12 +1,10 @@
 from message import Message
 
 
-contents = ""
-with open("../testdata/rtf-attachments.eml", "r") as fh:
-    contents += fh.read()
+fp = open("../testdata/rtf-attachments.eml", "rb")
 
 message = Message()
-message.parse(contents)
+message.parse_file(fp)
 
 if message.has_winmail():
     print("This is a TNEF message")
@@ -16,8 +14,8 @@ if message.has_winmail():
         for name in message.new_attachments:
             print("  " + name)
 
-    with open("../testdata/output.eml", "w") as fh:
-        fh.write(message.as_string_without_winmail())
+    with open("../testdata/output.eml", "wb") as fh:
+        fh.write(message.get_message_without_winmail().as_bytes())
 
 else:
     print("No TNEF data found!")
