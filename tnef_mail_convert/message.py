@@ -4,21 +4,23 @@ Message conversion from MIME with winmail.dat to extracted attachments
 
 import base64
 from email.parser import Parser
-import email.message as message
+import email.message
 from tnefparse import TNEF
 from typing import Union
+import copy
 
 WINMAIL_NAME = 'winmail.dat'
 WINMAIL_RENAMED = 'original-winmail.dat'
 
 
 class Message(object):
+    message: email.message.Message
     tnef_message: Union[TNEF, None]
-    tnef_payload: Union[message.Message, None]
+    tnef_payload: Union[email.message.Message, None]
 
     def __init__(self):
         self.original_body = None
-        self.message = message.Message()
+        self.message = email.message.Message()
         self.tnef_message = None
         self.tnef_payload = None
         self.new_attachments = []
@@ -29,10 +31,10 @@ class Message(object):
         self.message = parser.parsestr(text)
         self._read_tnef()
         if self.has_winmail():
+            self._extract_body()
             self._extract_htmlbody()
             self._extract_rtfbody()
             self._extract_attachments()
-            self._rename_winmail()
 
     def has_winmail(self):
         if not self.message.is_multipart():
@@ -40,7 +42,24 @@ class Message(object):
         return self.tnef_message is not None
 
     def __str__(self):
-        return self.message.__str__()
+        return self.as_string()
+
+    def as_string(self):
+        return self.message.as_string()
+
+    def as_string_without_winmail(self):
+        result = copy.copy(self.message)
+
+        del result["X-MS-TNEF-Correlator"]
+
+        payloads = []
+        for payload in self.message.get_payload():
+            if payload.get_content_type() != "application/ms-tnef":
+                payloads.append(payload)
+
+        result.set_payload(payloads)
+
+        return result.as_string()
 
     def _read_tnef(self):
         # TODO: does this work in non-multipart?
@@ -56,12 +75,32 @@ class Message(object):
                 self.tnef_message = TNEF(data)
                 return
 
+    def _extract_body(self):
+        """
+        Extract an text body in winmail to the normal body
+        """
+        body = self.tnef_message.body
+        if body is None:
+            return
+
+        new_payload = email.message.Message()
+        new_payload.set_type("text/plain")
+        new_payload.set_payload(body)
+        self.message.attach(new_payload)
+
     def _extract_htmlbody(self):
         """
         Extract an HTML body in winmail to the normal HTML body
-        TODO: check how this is coming from Outlook and how to correct
         """
-        pass
+        html = self.tnef_message.htmlbody
+        if html is None:
+            return
+
+        new_payload = email.message.Message()
+        new_payload.set_type("text/html")
+        # TODO: do we need base64?
+        new_payload.set_payload(html)
+        self.message.attach(new_payload)
 
     def _extract_rtfbody(self):
         """
@@ -73,7 +112,7 @@ class Message(object):
 
         # extract RTF body to an attachment
         filename = "mail-body.rtf"
-        new_payload = message.Message()
+        new_payload = email.message.Message()
         new_payload.set_type("application/rtf")
         new_payload.add_header("Content-Disposition", "attachment", filename=filename)
         new_payload.add_header("Content-Transfer-Encoding", "base64")
@@ -86,25 +125,13 @@ class Message(object):
         Extract every attachment to a regular MIME attachment
         """
         for attachment in self.tnef_message.attachments:
-            new_payload = message.Message()
+            new_payload = email.message.Message()
             new_payload.set_type("application/octet-stream")
             new_payload.add_header("Content-Disposition", "attachment", filename=attachment.long_filename())
             new_payload.add_header("Content-Transfer-Encoding", "base64")
             new_payload.set_payload(encode_payload(attachment.data))
             self.message.attach(new_payload)
             self.new_attachments.append(attachment.long_filename())
-
-    def _rename_winmail(self):
-        """
-        Replace meta data for winmail.dat, so the file can be recognized as replaced
-
-        But we want to keep the original
-
-        TODO: What about X-MS-TNEF-Correlator ?
-        """
-        if self.tnef_payload:
-            self.tnef_payload.replace_header("Content-Type", 'application/octet-stream; name="%s"' % WINMAIL_RENAMED)
-            self.tnef_payload.replace_header("Content-Disposition", 'attachment; filename="%s"' % WINMAIL_RENAMED)
 
 
 def encode_payload(data):

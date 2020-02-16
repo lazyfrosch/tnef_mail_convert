@@ -17,7 +17,7 @@ if message.has_winmail():
             print("  " + name)
 
     with open("../testdata/output.eml", "w") as fh:
-        fh.write(message.__str__())
+        fh.write(message.as_string_without_winmail())
 
 else:
     print("No TNEF data found!")
